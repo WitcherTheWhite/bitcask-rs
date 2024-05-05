@@ -3,7 +3,7 @@ pub mod btree;
 use crate::data::log_record::LogRecordPos;
 
 /// Indexer 抽象索引接口，可以用不同的数据结构实现该接口
-pub trait Indexer {
+pub trait Indexer: Sync + Send {
     /// 在索引中存储 key 对应的数据位置信息
     fn put(&self, key: Vec<u8>, pos: LogRecordPos) -> bool;
 
