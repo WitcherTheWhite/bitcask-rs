@@ -4,3 +4,21 @@ pub struct LogRecordPos {
     pub(crate) file_id: u32,
     pub(crate) offset: u64,
 }
+
+// LogRecord 写入到数据文件的记录
+pub struct LogRecord {
+    pub(crate) key: Vec<u8>,
+    pub(crate) value: Vec<u8>,
+    pub(crate) rec_type: LogRecordType,
+}
+
+impl LogRecord {
+    pub(crate) fn encode(&self) -> Vec<u8> {
+        todo!()
+    }
+}
+
+pub enum LogRecordType {
+    NOAMAL = 1,  // 正常写入的数据
+    DELETED = 2, // 删除数据的标记，墓碑值
+}
