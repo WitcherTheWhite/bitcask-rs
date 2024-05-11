@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use crate::{errors::Errors, fio::IOManager};
 
-use super::log_record::LogRecord;
+use super::log_record::ReadLogRecord;
+
+pub const DATA_FILE_NAME_SUFFIX: &str = ".data";
 
 pub struct DataFile {
     file_id: u32,                   // 数据文件 id
@@ -23,7 +25,11 @@ impl DataFile {
         self.write_off
     }
 
-    pub fn read(&self, offset: u64) -> Result<LogRecord, Errors> {
+    pub fn set_write_off(&mut self, offset: u64) {
+        self.write_off = offset
+    }
+
+    pub fn read(&self, offset: u64) -> Result<ReadLogRecord, Errors> {
         todo!()
     }
 

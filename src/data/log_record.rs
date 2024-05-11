@@ -22,3 +22,9 @@ pub enum LogRecordType {
     NOAMAL = 1,  // 正常写入的数据
     DELETED = 2, // 删除数据的标记，墓碑值
 }
+
+// 读取 LogRecord 的信息，包括数据大小
+pub struct ReadLogRecord {
+    pub(crate) record: LogRecord,
+    pub(crate) size: u64
+}

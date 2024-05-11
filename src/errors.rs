@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum Errors {
     #[error("failed to read from data file")]
     FailedReadFromDataFile,
@@ -27,6 +27,24 @@ pub enum Errors {
 
     #[error("datafile is not found")]
     DataFileIsNotFound,
+
+    #[error("database directory path can not be empty")]
+    DirPathIsEmpty,
+
+    #[error("data file size must be greater than 0")]
+    DataFileSizeInvalid,
+
+    #[error("failed to create database directory")]
+    FailedCreateDatabaseDir,
+
+    #[error("failed to open database directory")]
+    FailedOpenDatabaseDir,
+
+    #[error("database directory is corrupted")]
+    DataDirCorrupted,
+
+    #[error("read data file EOF")]
+    ReadDataFileEOF,
 }
 
 // pub type Result<T> = result::Result<T, Errors>;
