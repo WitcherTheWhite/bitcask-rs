@@ -2,10 +2,7 @@ use bytes::Bytes;
 use log::warn;
 use parking_lot::RwLock;
 use std::{
-    collections::HashMap,
-    fs::{create_dir_all, read_dir},
-    path::PathBuf,
-    sync::Arc,
+    collections::HashMap, default, fs::{create_dir_all, read_dir}, path::PathBuf, sync::Arc
 };
 
 use crate::{
@@ -92,22 +89,19 @@ impl Engine {
             return Err(Errors::KeyIsEmpty);
         }
 
-        // 构造 LogRecord
+        // 构造 LogRecord 并写入当前活跃文件
         let log_record = LogRecord {
             key: key.to_vec(),
             value: value.to_vec(),
             rec_type: LogRecordType::NOAMAL,
         };
-
         let log_record_pos = self.append_log_record(log_record)?;
 
         // 更新内存索引
-        let ok = self.index.put(key.to_vec(), log_record_pos);
-        if !ok {
-            return Err(Errors::FailedIndexUpdate);
+        match self.index.put(key.to_vec(), log_record_pos) {
+            true => Ok(()),
+            false => Err(Errors::FailedIndexUpdate),
         }
-
-        Ok(())
     }
 
     /// 根据 key 获取数据
@@ -116,12 +110,7 @@ impl Engine {
             return Err(Errors::KeyIsEmpty);
         }
 
-        // 从内存索引中获取数据位置信息
-        let pos = self.index.get(key.to_vec());
-        if pos.is_none() {
-            return Err(Errors::KeyIsNotFound);
-        }
-        let log_record_pos = pos.unwrap();
+        let log_record_pos = self.get_log_record_pos(&key)?;
 
         // 从数据文件中读取 LogRecord
         let active_file = self.active_file.read();
@@ -142,6 +131,38 @@ impl Engine {
             LogRecordType::DELETED => Err(Errors::KeyIsNotFound),
             _ => Ok(log_record.value.into()),
         }
+    }
+
+    /// 根据 key 删除数据
+    pub fn delete(&self, key: Bytes) -> Result<(), Errors> {
+        if key.is_empty() {
+            return Ok(());
+        }
+
+        self.get_log_record_pos(&key)?;
+
+        // 构造 LogRecord，标识为删除值并写入当前活跃文件
+        let log_record = LogRecord {
+            key: key.to_vec(),
+            value: Default::default(),
+            rec_type: LogRecordType::DELETED,
+        };
+        self.append_log_record(log_record)?;
+
+        // 更新内存索引
+        match self.index.delete(key.to_vec()) {
+            true => Ok(()),
+            false => Err(Errors::FailedIndexUpdate),
+        }
+    }
+
+    // 从内存索引中获取数据位置信息
+    fn get_log_record_pos(&self, key: &Bytes) -> Result<LogRecordPos, Errors> {
+        let pos = self.index.get(key.to_vec());
+        if pos.is_none() {
+            return Err(Errors::KeyIsNotFound);
+        }
+        Ok(pos.unwrap())
     }
 
     // 追加写入数据到当前活跃文件中
@@ -173,7 +194,7 @@ impl Engine {
         let write_off = active_file.get_write_off();
         active_file.write(&enc_record)?;
 
-        // 根据配置项决定是否初始化
+        // 根据配置项决定是否持久化
         if self.options.sync_writes {
             active_file.sync();
         }
@@ -221,11 +242,13 @@ impl Engine {
                     file_id: *file_id,
                     offset,
                 };
-
-                match log_record.rec_type {
+                let ok = match log_record.rec_type {
                     LogRecordType::NOAMAL => self.index.put(log_record.key, log_record_pos),
                     LogRecordType::DELETED => self.index.delete(log_record.key),
                 };
+                if !ok {
+                    return Err(Errors::FailedIndexUpdate);
+                }
 
                 offset += size;
             }
