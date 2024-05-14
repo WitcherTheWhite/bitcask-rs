@@ -2,7 +2,10 @@ use bytes::Bytes;
 use log::warn;
 use parking_lot::RwLock;
 use std::{
-    collections::HashMap, default, fs::{create_dir_all, read_dir}, path::PathBuf, sync::Arc
+    collections::HashMap,
+    fs::{create_dir_all, read_dir},
+    path::PathBuf,
+    sync::Arc,
 };
 
 use crate::{
@@ -179,7 +182,7 @@ impl Engine {
         // 判断当前活跃文件是否达到阈值，是则持久化当前活跃文件
         // 并将其存储到旧文件列表，最后打开一个新的活跃文件
         if active_file.get_write_off() + record_len > self.options.data_file_size {
-            active_file.sync();
+            active_file.sync()?;
 
             let mut older_files = self.older_files.write();
             let current_fid = active_file.get_file_id();
@@ -196,7 +199,7 @@ impl Engine {
 
         // 根据配置项决定是否持久化
         if self.options.sync_writes {
-            active_file.sync();
+            active_file.sync()?;
         }
 
         Ok(LogRecordPos {

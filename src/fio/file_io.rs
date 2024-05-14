@@ -1,8 +1,5 @@
 use std::{
-    fs::{File, OpenOptions},
-    io::Write,
-    os::unix::prelude::FileExt,
-    sync::Arc,
+    fs::{File, OpenOptions}, io::Write, os::unix::prelude::FileExt, path::PathBuf, sync::Arc
 };
 
 use log::error;
@@ -18,7 +15,7 @@ pub struct FileIO {
 }
 
 impl FileIO {
-    fn new(file_path: &str) -> Result<Self, Errors> {
+    pub fn new(file_path: PathBuf) -> Result<Self, Errors> {
         match OpenOptions::new()
             .create(true)
             .read(true)
@@ -81,8 +78,8 @@ mod tests {
 
     #[test]
     fn test_file_io_write() {
-        let path = "/tmp/a.data";
-        let fio_res = FileIO::new(path);
+        let path = PathBuf::from("/tmp/a.data");
+        let fio_res = FileIO::new(path.clone());
         assert!(fio_res.is_ok());
         let fio = fio_res.unwrap();
 
@@ -100,8 +97,8 @@ mod tests {
 
     #[test]
     fn test_file_io_read() {
-        let path = "/tmp/b.data";
-        let fio_res = FileIO::new(path);
+        let path = PathBuf::from("/tmp/b.data");
+        let fio_res = FileIO::new(path.clone());
         assert!(fio_res.is_ok());
         let fio = fio_res.unwrap();
 
@@ -128,8 +125,8 @@ mod tests {
 
     #[test]
     fn test_file_io_sync() {
-        let path = "/tmp/c.data";
-        let fio_res = FileIO::new(path);
+        let path = PathBuf::from("/tmp/c.data");
+        let fio_res = FileIO::new(path.clone());
         assert!(fio_res.is_ok());
         let fio = fio_res.unwrap();
 

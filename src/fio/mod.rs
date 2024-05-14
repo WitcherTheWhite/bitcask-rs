@@ -1,6 +1,10 @@
 pub mod file_io;
 
+use std::path::PathBuf;
+
 use crate::errors::Errors;
+
+use self::file_io::FileIO;
 
 /// 抽象 IO 管理接口
 pub trait IOManager: Sync + Send {
@@ -12,4 +16,9 @@ pub trait IOManager: Sync + Send {
 
     /// 持久化数据
     fn sync(&self) -> Result<(), Errors>;
+}
+
+/// 根据数据文件路径初始化 IOManager
+pub fn new_io_manager(file_path: PathBuf) -> Result<impl IOManager, Errors> {
+    FileIO::new(file_path)
 }
