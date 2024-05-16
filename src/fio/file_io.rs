@@ -87,9 +87,9 @@ mod tests {
         assert!(res1.is_ok());
         assert_eq!(res1.unwrap(), 5);
 
-        let res2 = fio.write("key-b".as_bytes());
+        let res2 = fio.write("hsy".as_bytes());
         assert!(res2.is_ok());
-        assert_eq!(res2.unwrap(), 5);
+        assert_eq!(res2.unwrap(), 3);
 
         let remove_res = remove_file(path);
         assert!(remove_res.is_ok());
@@ -106,9 +106,9 @@ mod tests {
         assert!(res1.is_ok());
         assert_eq!(res1.unwrap(), 5);
 
-        let res2 = fio.write("key-b".as_bytes());
+        let res2 = fio.write("hsy".as_bytes());
         assert!(res2.is_ok());
-        assert_eq!(res2.unwrap(), 5);
+        assert_eq!(res2.unwrap(), 3);
 
         let mut buf = [0u8; 5];
         let read_res1 = fio.read(&mut buf, 0);
@@ -117,7 +117,7 @@ mod tests {
 
         let read_res2 = fio.read(&mut buf, 5);
         assert!(read_res2.is_ok());
-        assert_eq!(read_res2.unwrap(), 5);
+        assert_eq!(read_res2.unwrap(), 3);
 
         let remove_res = remove_file(path);
         assert!(remove_res.is_ok());

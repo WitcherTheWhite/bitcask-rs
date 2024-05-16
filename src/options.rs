@@ -12,3 +12,14 @@ pub struct Options {
 pub enum IndexType {
     BTree,
 }
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            dir_path: std::env::temp_dir().join("bitcask"),
+            data_file_size: 256 * 1024 * 1024,
+            sync_writes: false,
+            index_type: IndexType::BTree,
+        }
+    }
+}

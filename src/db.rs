@@ -58,6 +58,7 @@ impl Engine {
         }
 
         // 将旧数据文件加入到 older_files
+        data_files.reverse();
         let mut older_files = HashMap::new();
         if data_files.len() > 1 {
             for _ in 0..=data_files.len() - 2 {
@@ -142,7 +143,10 @@ impl Engine {
             return Ok(());
         }
 
-        self.get_log_record_pos(&key)?;
+        let res = self.get_log_record_pos(&key);
+        if res.is_err() {
+            return Ok(());
+        }
 
         // 构造 LogRecord，标识为删除值并写入当前活跃文件
         let log_record = LogRecord {

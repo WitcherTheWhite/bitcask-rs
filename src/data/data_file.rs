@@ -77,7 +77,7 @@ impl DataFile {
 
         Ok(ReadLogRecord {
             record: log_record,
-            size: (header_size + kv_buf.len()) as u64,
+            size: (header_size + key_size + value_size + 4) as u64,
         })
     }
 
@@ -87,7 +87,7 @@ impl DataFile {
         Ok(n_bytes)
     }
 
-    pub fn sync(&self) -> Result<(), Errors>{
+    pub fn sync(&self) -> Result<(), Errors> {
         self.io_manager.sync()
     }
 }
@@ -100,6 +100,8 @@ fn get_data_file_path(dir_path: PathBuf, file_id: u32) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::remove_file;
+
     use super::*;
 
     #[test]
@@ -111,28 +113,43 @@ mod tests {
         let data_file1 = data_file_res1.unwrap();
         assert_eq!(data_file1.get_file_id(), 0);
         assert_eq!(data_file1.get_write_off(), 0);
+        let remove_res1 = remove_file(get_data_file_path(
+            dir_path.clone(),
+            data_file1.get_file_id(),
+        ));
+        assert!(remove_res1.is_ok());
 
         let data_file_res2 = DataFile::new(dir_path.clone(), 0);
         assert!(data_file_res2.is_ok());
         let data_file2 = data_file_res2.unwrap();
         assert_eq!(data_file2.get_file_id(), 0);
         assert_eq!(data_file2.get_write_off(), 0);
+        let remove_res2 = remove_file(get_data_file_path(
+            dir_path.clone(),
+            data_file2.get_file_id(),
+        ));
+        assert!(remove_res2.is_ok());
 
-        let data_file_res3 = DataFile::new(dir_path.clone(), 666);
+        let data_file_res3 = DataFile::new(dir_path.clone(), 1);
         assert!(data_file_res3.is_ok());
         let data_file3 = data_file_res3.unwrap();
-        assert_eq!(data_file3.get_file_id(), 666);
+        assert_eq!(data_file3.get_file_id(), 1);
         assert_eq!(data_file3.get_write_off(), 0);
+        let remove_res3 = remove_file(get_data_file_path(
+            dir_path.clone(),
+            data_file3.get_file_id(),
+        ));
+        assert!(remove_res3.is_ok());
     }
 
     #[test]
     fn test_data_file_write() {
         let dir_path = std::env::temp_dir();
 
-        let data_file_res1 = DataFile::new(dir_path.clone(), 0);
+        let data_file_res1 = DataFile::new(dir_path.clone(), 2);
         assert!(data_file_res1.is_ok());
         let mut data_file1 = data_file_res1.unwrap();
-        assert_eq!(data_file1.get_file_id(), 0);
+        assert_eq!(data_file1.get_file_id(), 2);
         assert_eq!(data_file1.get_write_off(), 0);
 
         let write_res1 = data_file1.write("hsy".as_bytes());
@@ -142,16 +159,22 @@ mod tests {
         let write_res2 = data_file1.write("hahaha".as_bytes());
         assert!(write_res2.is_ok());
         assert_eq!(write_res2.unwrap(), 6);
+
+        let remove_res1 = remove_file(get_data_file_path(
+            dir_path.clone(),
+            data_file1.get_file_id(),
+        ));
+        assert!(remove_res1.is_ok());
     }
 
     #[test]
     fn test_data_file_sync() {
         let dir_path = std::env::temp_dir();
 
-        let data_file_res1 = DataFile::new(dir_path.clone(), 0);
+        let data_file_res1 = DataFile::new(dir_path.clone(), 3);
         assert!(data_file_res1.is_ok());
         let mut data_file1 = data_file_res1.unwrap();
-        assert_eq!(data_file1.get_file_id(), 0);
+        assert_eq!(data_file1.get_file_id(), 3);
         assert_eq!(data_file1.get_write_off(), 0);
 
         let write_res1 = data_file1.write("hsy".as_bytes());
@@ -159,6 +182,84 @@ mod tests {
         assert_eq!(write_res1.unwrap(), 3);
 
         let sync_res = data_file1.sync();
-        assert!(sync_res.is_ok())
+        assert!(sync_res.is_ok());
+
+        let remove_res1 = remove_file(get_data_file_path(
+            dir_path.clone(),
+            data_file1.get_file_id(),
+        ));
+        assert!(remove_res1.is_ok());
+    }
+
+    #[test]
+    fn test_data_file_read_log_record() {
+        let dir_path = std::env::temp_dir();
+        let data_file_res1 = DataFile::new(dir_path.clone(), 4);
+        assert!(data_file_res1.is_ok());
+        let mut data_file1 = data_file_res1.unwrap();
+        assert_eq!(data_file1.get_file_id(), 4);
+        assert_eq!(data_file1.get_write_off(), 0);
+
+        // 从初始位置开始
+        let rec1 = LogRecord {
+            key: "name".as_bytes().to_vec(),
+            value: "hsy".as_bytes().to_vec(),
+            rec_type: LogRecordType::NOAMAL,
+        };
+        let write_res1 = data_file1.write(&rec1.encode());
+        assert!(write_res1.is_ok());
+        let read_res1 = data_file1.read(0);
+        assert!(read_res1.is_ok());
+        let read_res1 = read_res1.unwrap();
+        let size1 = read_res1.size;
+        let read_rec1 = read_res1.record;
+        assert_eq!(size1, write_res1.unwrap() as u64);
+        assert_eq!(read_rec1.key, rec1.key);
+        assert_eq!(read_rec1.value, rec1.value);
+        assert_eq!(read_rec1.rec_type, rec1.rec_type);
+
+        // 新的位置开始
+        let rec2 = LogRecord {
+            key: "name".as_bytes().to_vec(),
+            value: "james".as_bytes().to_vec(),
+            rec_type: LogRecordType::NOAMAL,
+        };
+        let write_res2 = data_file1.write(&rec2.encode());
+        assert!(write_res2.is_ok());
+
+        let read_res2 = data_file1.read(size1);
+        assert!(read_res2.is_ok());
+        let read_res2 = read_res2.unwrap();
+        let size2 = read_res2.size;
+        let read_rec2 = read_res2.record;
+        assert_eq!(size2, write_res2.unwrap() as u64);
+        assert_eq!(read_rec2.key, rec2.key);
+        assert_eq!(read_rec2.value, rec2.value);
+        assert_eq!(read_rec2.rec_type, rec2.rec_type);
+
+        // Deleted 数据
+        let rec3 = LogRecord {
+            key: "name".as_bytes().to_vec(),
+            value: Default::default(),
+            rec_type: LogRecordType::DELETED,
+        };
+        let write_res3 = data_file1.write(&rec3.encode());
+        assert!(write_res3.is_ok());
+
+        let read_res3 = data_file1.read(size1 + size2);
+        assert!(read_res3.is_ok());
+        let read_res3 = read_res3.unwrap();
+        let size3 = read_res3.size;
+        let read_rec3 = read_res3.record;
+        assert_eq!(size3, write_res3.unwrap() as u64);
+        assert_eq!(read_rec3.key, rec3.key);
+        assert_eq!(read_rec3.value, rec3.value);
+        assert_eq!(read_rec3.rec_type, rec3.rec_type);
+
+        let remove_res1 = remove_file(get_data_file_path(
+            dir_path.clone(),
+            data_file1.get_file_id(),
+        ));
+        assert!(remove_res1.is_ok());
     }
 }
