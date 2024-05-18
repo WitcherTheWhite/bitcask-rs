@@ -26,7 +26,7 @@ pub struct Engine {
     /// 旧文件列表，保存文件 id 和 DafaFile 的映射关系
     older_files: Arc<RwLock<HashMap<u32, DataFile>>>,
     /// 数据内存索引
-    index: Box<dyn Indexer>,
+    pub(crate) index: Box<dyn Indexer>,
     /// 数据文件列表，保存所有文件 id
     file_ids: Vec<u32>,
 }
@@ -87,6 +87,18 @@ impl Engine {
         Ok(engine)
     }
 
+    /// 关闭存储引擎，释放相关资源
+    pub fn close(&self) -> Result<(), Errors> {
+        let read_guard = self.active_file.read();
+        read_guard.sync()
+    }
+
+    /// 持久化当前活跃文件
+    pub fn sync(&self) -> Result<(), Errors> {
+        let read_guard = self.active_file.read();
+        read_guard.sync()
+    }
+
     /// 存储 key/value 数据，key 不能为空
     pub fn put(&self, key: Bytes, value: Bytes) -> Result<(), Errors> {
         if key.is_empty() {
@@ -117,17 +129,22 @@ impl Engine {
         let log_record_pos = self.get_log_record_pos(&key)?;
 
         // 从数据文件中读取 LogRecord
+        self.get_value_by_position(log_record_pos)
+    }
+
+    // 根据 LogRecord 位置信息读取相应的 value
+    pub(crate) fn get_value_by_position(&self, pos: LogRecordPos) -> Result<Bytes, Errors> {
         let active_file = self.active_file.read();
         let older_files = self.older_files.read();
-        let file_id = log_record_pos.file_id;
+        let file_id = pos.file_id;
         let log_record = match file_id == active_file.get_file_id() {
-            true => active_file.read(log_record_pos.offset)?.record,
+            true => active_file.read(pos.offset)?.record,
             false => {
                 let data_file = older_files.get(&file_id);
                 if data_file.is_none() {
                     return Err(Errors::DataFileIsNotFound);
                 }
-                data_file.unwrap().read(log_record_pos.offset)?.record
+                data_file.unwrap().read(pos.offset)?.record
             }
         };
 

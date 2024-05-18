@@ -6,6 +6,7 @@ mod util;
 
 pub mod db;
 pub mod options;
+pub mod iterator;
 
 #[cfg(test)]
 mod db_tests;

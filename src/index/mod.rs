@@ -1,6 +1,11 @@
 pub mod btree;
 
-use crate::{data::log_record::LogRecordPos, options::IndexType};
+use bytes::Bytes;
+
+use crate::{
+    data::log_record::LogRecordPos,
+    options::{IndexType, IteratorOptions},
+};
 
 use self::btree::BTree;
 
@@ -14,6 +19,12 @@ pub trait Indexer: Sync + Send {
 
     /// 根据 key 删除对应的数据位置信息
     fn delete(&self, key: Vec<u8>) -> bool;
+
+    /// 返回索引迭代器
+    fn iterator(&self, options: IteratorOptions) -> Box<dyn IndexIterator>;
+
+    /// 返回索引中所有的 key
+    fn list_keys(&self) -> Vec<Bytes>;
 }
 
 /// 根据类型打开内存索引
@@ -21,4 +32,16 @@ pub fn new_indexer(index_type: IndexType) -> impl Indexer {
     match index_type {
         IndexType::BTree => BTree::new(),
     }
+}
+
+/// 抽象索引迭代器
+pub trait IndexIterator: Sync + Send {
+    // 回到迭代器起点，即第一条数据
+    fn rewind(&mut self);
+
+    // 根据 key 寻找第一个大于（或小于）等于的目标 key，从它开始遍历
+    fn seek(&mut self, key: Vec<u8>);
+
+    // 跳转到下一个 key，返回 None 说明迭代完毕
+    fn next(&mut self) -> Option<(&Vec<u8>, &LogRecordPos)>;
 }
