@@ -47,7 +47,7 @@ impl LogRecord {
         let crc = hasher.finalize();
         buf.put_u32(crc);
 
-        (buf.to_vec(), crc)    
+        (buf.to_vec(), crc)
     }
 
     // LogRecord 编码后的长度
@@ -63,8 +63,9 @@ impl LogRecord {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LogRecordType {
-    NOAMAL = 1,  // 正常写入的数据
-    DELETED = 2, // 删除数据的标记，墓碑值
+    NOAMAL = 1,       // 正常写入的数据
+    DELETED = 2,      // 删除数据的标记，墓碑值
+    TXNFINISHED = 3, // 标记事务完成的数据
 }
 
 impl LogRecordType {
@@ -72,6 +73,7 @@ impl LogRecordType {
         match v {
             1 => LogRecordType::NOAMAL,
             2 => LogRecordType::DELETED,
+            3 => LogRecordType::TXNFINISHED,
             _ => panic!("unknown log record type"),
         }
     }
@@ -82,6 +84,12 @@ impl LogRecordType {
 pub struct ReadLogRecord {
     pub(crate) record: LogRecord,
     pub(crate) size: u64,
+}
+
+// 事务数据的信息
+pub struct TransactionLogRecord {
+    pub(crate) record: LogRecord,
+    pub(crate) pos: LogRecordPos,
 }
 
 // LogRecord header 部分最大长度

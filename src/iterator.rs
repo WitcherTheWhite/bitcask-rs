@@ -41,12 +41,14 @@ impl Engine {
 }
 
 impl Iterator<'_> {
+    #[allow(dead_code)]
     // 回到迭代器起点，即第一条数据
     fn rewind(&self) {
         let mut index_iter = self.index_iter.write();
         index_iter.rewind();
     }
 
+    #[allow(dead_code)]
     // 根据 key 寻找第一个大于（或小于）等于的目标 key，从它开始遍历
     fn seek(&self, key: Vec<u8>) {
         let mut index_iter = self.index_iter.write();

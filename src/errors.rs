@@ -48,6 +48,9 @@ pub enum Errors {
 
     #[error("invalid crc value, log record maybe corrupted")]
     InvalidLogRecordCrc,
+
+    #[error("exceed max batch num size")]
+    ExceedMaxBatchNum,
 }
 
 // pub type Result<T> = result::Result<T, Errors>;
