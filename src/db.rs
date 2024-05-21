@@ -14,21 +14,23 @@ use std::{
 use crate::{
     batch::{log_record_key_with_seq, parse_log_record_key, NON_TXN_SEQ_NO},
     data::{
-        data_file::{DataFile, DATA_FILE_NAME_SUFFIX},
+        data_file::{DataFile, DATA_FILE_NAME_SUFFIX, MERGE_FINISHED_FILE_NAME},
         log_record::{LogRecord, LogRecordPos, LogRecordType, TransactionLogRecord},
     },
     errors::Errors,
     index::{self, Indexer},
+    merge::load_merge_files,
     options::Options,
 };
 
 /// bitcask 存储引擎实例
 pub struct Engine {
-    options: Arc<Options>,
+    /// 配置项
+    pub(crate) options: Arc<Options>,
     /// 当前活跃文件，用于写入新的数据
-    active_file: Arc<RwLock<DataFile>>,
+    pub(crate) active_file: Arc<RwLock<DataFile>>,
     /// 旧文件列表，保存文件 id 和 DafaFile 的映射关系
-    older_files: Arc<RwLock<HashMap<u32, DataFile>>>,
+    pub(crate) older_files: Arc<RwLock<HashMap<u32, DataFile>>>,
     /// 数据内存索引
     pub(crate) index: Box<dyn Indexer>,
     /// 数据文件列表，保存所有文件 id
@@ -37,6 +39,8 @@ pub struct Engine {
     pub(crate) batch_commit_lock: Mutex<()>,
     /// 事务序列号，全局递增
     pub(crate) seq_no: Arc<AtomicUsize>,
+    /// 防止多个线程同时 merge
+    pub(crate) merging_lock: Mutex<()>,
 }
 
 impl Engine {
@@ -55,6 +59,9 @@ impl Engine {
                 return Err(Errors::FailedCreateDatabaseDir);
             }
         }
+
+        // 加载 merge 目录
+        load_merge_files(dir_path.clone())?;
 
         // 加载数据文件
         let mut data_files = load_data_files(dir_path.clone())?;
@@ -89,7 +96,11 @@ impl Engine {
             file_ids,
             batch_commit_lock: Mutex::new(()),
             seq_no: Arc::new(AtomicUsize::new(1)),
+            merging_lock: Mutex::new(()),
         };
+
+        // 从 hint 文件中快速建立索引
+        engine.load_index_from_hint_file()?;
 
         // 从数据文件中加载内存索引
         engine.load_index()?;
@@ -217,10 +228,10 @@ impl Engine {
 
             let mut older_files = self.older_files.write();
             let current_fid = active_file.get_file_id();
-            let old_file = DataFile::new(dir_path.clone(), current_fid).unwrap();
+            let old_file = DataFile::new(dir_path.clone(), current_fid)?;
             older_files.insert(current_fid, old_file);
 
-            let new_file = DataFile::new(dir_path, current_fid + 1).unwrap();
+            let new_file = DataFile::new(dir_path, current_fid + 1)?;
             *active_file = new_file;
         }
 
@@ -245,6 +256,17 @@ impl Engine {
             return Ok(());
         }
 
+        // 拿到最近未参与 merge 的文件 id
+        let mut non_merge_fid = 0;
+        let merge_fin_file = self.options.dir_path.join(MERGE_FINISHED_FILE_NAME);
+        if merge_fin_file.is_file() {
+            let merge_fin_file = DataFile::new_merge_finished_file(self.options.dir_path.clone())?;
+            let read_res = merge_fin_file.read(0)?;
+            let v = String::from_utf8(read_res.record.value).unwrap();
+            non_merge_fid = v.parse::<u32>().unwrap();
+        }
+
+
         let mut active_file = self.active_file.write();
         let older_files = self.older_files.read();
 
@@ -253,6 +275,11 @@ impl Engine {
 
         // 读取所有数据文件并构建内存索引
         for (i, file_id) in self.file_ids.iter().enumerate() {
+            // 如果文件 id 比 non_merge_fid 小，则跳过
+            if *file_id < non_merge_fid {
+                continue;
+            }
+
             let mut offset = 0;
             loop {
                 let log_record_res = match *file_id == active_file.get_file_id() {

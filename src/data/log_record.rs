@@ -1,13 +1,46 @@
 use std::u8;
 
-use bytes::{BufMut, BytesMut};
-use prost::{encode_length_delimiter, length_delimiter_len};
+use bytes::{BufMut, Bytes, BytesMut};
+use prost::{
+    encode_length_delimiter,
+    encoding::{decode_varint, encode_varint},
+    length_delimiter_len,
+};
 
 // 数据位置索引信息，描述数据存储的位置
 #[derive(Clone, Copy, Debug)]
 pub struct LogRecordPos {
     pub(crate) file_id: u32,
     pub(crate) offset: u64,
+}
+
+impl LogRecordPos {
+    // 对 LogRecordPos 编码
+    pub fn encode(&self) -> Vec<u8> {
+        let mut buf = BytesMut::new();
+        encode_varint(self.file_id as u64, &mut buf);
+        encode_varint(self.offset, &mut buf);
+        buf.to_vec()
+    }
+}
+
+// 解码 LogRecordPos
+pub fn decode_log_record_pos(pos: Vec<u8>) -> LogRecordPos {
+    let mut buf = Bytes::from(pos);
+
+    let file_id = match decode_varint(&mut buf) {
+        Ok(fid) => fid as u32,
+        Err(e) => panic!("decode log record pos err: {}", e),
+    };
+    let offset = match decode_varint(&mut buf) {
+        Ok(n) => n,
+        Err(e) => panic!("decode log record pos err: {}", e),
+    };
+
+    LogRecordPos {
+        file_id,
+        offset,
+    }
 }
 
 // LogRecord 写入到数据文件的记录
@@ -63,8 +96,8 @@ impl LogRecord {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LogRecordType {
-    NOAMAL = 1,       // 正常写入的数据
-    DELETED = 2,      // 删除数据的标记，墓碑值
+    NOAMAL = 1,      // 正常写入的数据
+    DELETED = 2,     // 删除数据的标记，墓碑值
     TXNFINISHED = 3, // 标记事务完成的数据
 }
 

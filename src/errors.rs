@@ -51,6 +51,9 @@ pub enum Errors {
 
     #[error("exceed max batch num size")]
     ExceedMaxBatchNum,
+
+    #[error("merge is in processing")]
+    MergeInProcess,
 }
 
 // pub type Result<T> = result::Result<T, Errors>;

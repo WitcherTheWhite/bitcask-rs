@@ -9,9 +9,11 @@ use crate::{
     fio::{new_io_manager, IOManager},
 };
 
-use super::log_record::{max_log_record_header_size, ReadLogRecord};
+use super::log_record::{max_log_record_header_size, LogRecordPos, ReadLogRecord};
 
 pub const DATA_FILE_NAME_SUFFIX: &str = ".data";
+pub(crate) const HINT_FILE_NAME: &str = "hint-index";
+pub(crate) const MERGE_FINISHED_FILE_NAME: &str = "merge-finished";
 
 /// 存储引擎数据文件实例
 pub struct DataFile {
@@ -90,10 +92,47 @@ impl DataFile {
     pub fn sync(&self) -> Result<(), Errors> {
         self.io_manager.sync()
     }
+
+    // 创建 hint 索引文件，用于启动时快速构建索引
+    pub fn new_hint_file(dir_path: PathBuf) -> Result<DataFile, Errors> {
+        let file_path = dir_path.join(HINT_FILE_NAME);
+        let io_manager = new_io_manager(file_path)?;
+
+        Ok(DataFile {
+            file_id: 0,
+            write_off: 0,
+            io_manager: Box::new(io_manager),
+        })
+    }
+
+    // 写入 key 的索引信息
+    pub fn write_hint_record(&mut self, key: Vec<u8>, pos: LogRecordPos) -> Result<(), Errors> {
+        let hint_record = LogRecord {
+            key,
+            value: pos.encode(),
+            rec_type: LogRecordType::NOAMAL,
+        };
+        let enc_record = hint_record.encode();
+        self.write(&enc_record)?;
+
+        Ok(())
+    }
+
+    // 标识 merge 完成的文件
+    pub fn new_merge_finished_file(dir_path: PathBuf) -> Result<DataFile, Errors> {
+        let file_path = dir_path.join(MERGE_FINISHED_FILE_NAME);
+        let io_manager = new_io_manager(file_path)?;
+
+        Ok(DataFile {
+            file_id: 0,
+            write_off: 0,
+            io_manager: Box::new(io_manager),
+        })
+    }
 }
 
 // 根据 dir_path 和 file_id 构建数据文件路径
-fn get_data_file_path(dir_path: PathBuf, file_id: u32) -> PathBuf {
+pub(crate) fn get_data_file_path(dir_path: PathBuf, file_id: u32) -> PathBuf {
     let file_name = std::format!("{:09}", file_id) + DATA_FILE_NAME_SUFFIX;
     dir_path.join(file_name)
 }
