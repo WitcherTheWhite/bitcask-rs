@@ -14,6 +14,7 @@ use super::log_record::{max_log_record_header_size, LogRecordPos, ReadLogRecord}
 pub const DATA_FILE_NAME_SUFFIX: &str = ".data";
 pub(crate) const HINT_FILE_NAME: &str = "hint-index";
 pub(crate) const MERGE_FINISHED_FILE_NAME: &str = "merge-finished";
+pub const SEQ_NO_FILE_NAME: &str = "seq-no";
 
 /// 存储引擎数据文件实例
 pub struct DataFile {
@@ -44,6 +45,10 @@ impl DataFile {
 
     pub fn set_write_off(&mut self, offset: u64) {
         self.write_off = offset
+    }
+
+    pub fn file_size(&self) -> u64 {
+        self.io_manager.size()
     }
 
     /// 从数据文件中读取 LogRecord
@@ -121,6 +126,18 @@ impl DataFile {
     // 标识 merge 完成的文件
     pub fn new_merge_finished_file(dir_path: PathBuf) -> Result<DataFile, Errors> {
         let file_path = dir_path.join(MERGE_FINISHED_FILE_NAME);
+        let io_manager = new_io_manager(file_path)?;
+
+        Ok(DataFile {
+            file_id: 0,
+            write_off: 0,
+            io_manager: Box::new(io_manager),
+        })
+    }
+
+    /// 新建或打开存储事务序列号的文件
+    pub fn new_seq_no_file(dir_path: PathBuf) -> Result<DataFile, Errors> {
+        let file_path = dir_path.join(SEQ_NO_FILE_NAME);
         let io_manager = new_io_manager(file_path)?;
 
         Ok(DataFile {

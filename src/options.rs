@@ -8,9 +8,11 @@ pub struct Options {
     pub index_type: IndexType, // 索引类型
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum IndexType {
     BTree,
+    SkipList,
+    BPlusTree,
 }
 
 impl Default for Options {
@@ -19,7 +21,7 @@ impl Default for Options {
             dir_path: std::env::temp_dir().join("bitcask"),
             data_file_size: 256 * 1024 * 1024,
             sync_writes: false,
-            index_type: IndexType::BTree,
+            index_type: IndexType::SkipList
         }
     }
 }

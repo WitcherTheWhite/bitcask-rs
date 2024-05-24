@@ -3,7 +3,7 @@ use log::warn;
 use parking_lot::{Mutex, RwLock};
 use std::{
     collections::HashMap,
-    fs::{create_dir_all, read_dir},
+    fs::{create_dir_all, read_dir, remove_file},
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -14,14 +14,16 @@ use std::{
 use crate::{
     batch::{log_record_key_with_seq, parse_log_record_key, NON_TXN_SEQ_NO},
     data::{
-        data_file::{DataFile, DATA_FILE_NAME_SUFFIX, MERGE_FINISHED_FILE_NAME},
+        data_file::{DataFile, DATA_FILE_NAME_SUFFIX, MERGE_FINISHED_FILE_NAME, SEQ_NO_FILE_NAME},
         log_record::{LogRecord, LogRecordPos, LogRecordType, TransactionLogRecord},
     },
     errors::Errors,
     index::{self, Indexer},
     merge::load_merge_files,
-    options::Options,
+    options::{IndexType, Options},
 };
+
+const SEQ_NO_KEY: &str = "seq.no";
 
 /// bitcask 存储引擎实例
 pub struct Engine {
@@ -41,6 +43,10 @@ pub struct Engine {
     pub(crate) seq_no: Arc<AtomicUsize>,
     /// 防止多个线程同时 merge
     pub(crate) merging_lock: Mutex<()>,
+    /// 不存在则禁止 WriteBatch 使用
+    pub(crate) seq_file_exists: bool,
+    /// 是否是第一次初始化该目录
+    pub(crate) is_initial: bool,
 }
 
 impl Engine {
@@ -51,13 +57,19 @@ impl Engine {
             return Err(e);
         }
 
+        let mut is_initial = false;
         // 如果数据目录不存在则新建
         let dir_path = options.dir_path.clone();
         if !dir_path.is_dir() {
+            is_initial = true;
             if let Err(e) = create_dir_all(dir_path.clone()) {
                 warn!("create database directory err: {}", e);
                 return Err(Errors::FailedCreateDatabaseDir);
             }
+        }
+        let entries = read_dir(dir_path.clone()).unwrap();
+        if entries.count() == 0 {
+            is_initial = true;
         }
 
         // 加载 merge 目录
@@ -92,24 +104,51 @@ impl Engine {
             options: Arc::new(options.clone()),
             active_file: Arc::new(RwLock::new(active_file)),
             older_files: Arc::new(RwLock::new(older_files)),
-            index: Box::new(index::new_indexer(options.index_type)),
+            index: index::new_indexer(options.index_type, dir_path.clone()),
             file_ids,
             batch_commit_lock: Mutex::new(()),
             seq_no: Arc::new(AtomicUsize::new(1)),
             merging_lock: Mutex::new(()),
+            seq_file_exists: false,
+            is_initial,
         };
 
-        // 从 hint 文件中快速建立索引
-        engine.load_index_from_hint_file()?;
+        // b+树索引存放在磁盘上，不需要加载数据文件建立索引
+        if engine.options.index_type != IndexType::BPlusTree {
+            // 从 hint 文件中快速建立索引
+            engine.load_index_from_hint_file()?;
 
-        // 从数据文件中加载内存索引
-        engine.load_index()?;
+            // 从数据文件中加载内存索引
+            engine.load_index()?;
+        }
+
+        if engine.options.index_type == IndexType::BTree {
+            let (exists, seq_no) = engine.load_seq_no();
+            engine.seq_file_exists = exists;
+            engine.seq_no.store(seq_no, Ordering::SeqCst);
+
+            // 设置当前活跃文件的偏移
+            let mut active_file = engine.active_file.write();
+            let file_size = active_file.file_size();
+            active_file.set_write_off(file_size);
+        }
 
         Ok(engine)
     }
 
     /// 关闭存储引擎，释放相关资源
     pub fn close(&self) -> Result<(), Errors> {
+        // 记录当前的事务序列号
+        let mut seq_no_file = DataFile::new_seq_no_file(self.options.dir_path.clone())?;
+        let seq_no = self.seq_no.load(Ordering::SeqCst);
+        let record = LogRecord {
+            key: SEQ_NO_KEY.as_bytes().to_vec(),
+            value: seq_no.to_string().into_bytes(),
+            rec_type: LogRecordType::NOAMAL,
+        };
+        seq_no_file.write(&record.encode())?;
+        seq_no_file.sync()?;
+
         let read_guard = self.active_file.read();
         read_guard.sync()
     }
@@ -266,7 +305,6 @@ impl Engine {
             non_merge_fid = v.parse::<u32>().unwrap();
         }
 
-
         let mut active_file = self.active_file.write();
         let older_files = self.older_files.read();
 
@@ -365,6 +403,35 @@ impl Engine {
             LogRecordType::NOAMAL => self.index.put(key, pos),
             LogRecordType::DELETED => self.index.delete(key),
             _ => true,
+        }
+    }
+
+    // 加载事务序列号
+    fn load_seq_no(&self) -> (bool, usize) {
+        let file_path = self.options.dir_path.join(SEQ_NO_FILE_NAME);
+        if !file_path.is_file() {
+            return (false, 0);
+        }
+
+        let seq_no_file = DataFile::new_seq_no_file(self.options.dir_path.clone()).unwrap();
+        let record = match seq_no_file.read(0) {
+            Ok(res) => res.record,
+            Err(e) => panic!("failed to read seq no: {}", e),
+        };
+        let v = String::from_utf8(record.value).unwrap();
+        let seq_no = v.parse::<usize>().unwrap();
+
+        // 加载后删除文件，避免追加写入
+        remove_file(file_path).unwrap();
+
+        (true, seq_no)
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        if let Err(e) = self.close() {
+            log::error!("error while closing engine: {}", e);
         }
     }
 }

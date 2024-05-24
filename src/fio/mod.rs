@@ -16,6 +16,9 @@ pub trait IOManager: Sync + Send {
 
     /// 持久化数据
     fn sync(&self) -> Result<(), Errors>;
+
+    /// 获取文件大小
+    fn size(&self) -> u64;
 }
 
 /// 根据数据文件路径初始化 IOManager

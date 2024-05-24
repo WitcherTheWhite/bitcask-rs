@@ -11,7 +11,7 @@ use crate::{
     data::log_record::{LogRecord, LogRecordType},
     db::Engine,
     errors::Errors,
-    options::WriteBatchOptions,
+    options::{IndexType, WriteBatchOptions},
 };
 
 const TXN_FIN_KEY: &[u8] = "txn-fin".as_bytes();
@@ -25,12 +25,15 @@ pub struct WriteBatch<'a> {
 }
 
 impl Engine {
-    pub fn new_write_batch(&self, options: WriteBatchOptions) -> WriteBatch {
-        WriteBatch {
+    pub fn new_write_batch(&self, options: WriteBatchOptions) -> Result<WriteBatch, Errors> {
+        if self.options.index_type == IndexType::BPlusTree && !self.seq_file_exists && !self.is_initial {
+            return Err(Errors::UnableToUseWriteBatch);
+        }
+        Ok(WriteBatch {
             prending_writes: Arc::new(Mutex::new(HashMap::new())),
             engine: self,
             options,
-        }
+        })
     }
 }
 
@@ -164,7 +167,7 @@ mod tests {
         opts.data_file_size = 64 * 1024 * 1024;
         let engine = Engine::open(opts.clone()).expect("failed to open engine");
 
-        let wb = engine.new_write_batch(WriteBatchOptions::default());
+        let wb = engine.new_write_batch(WriteBatchOptions::default()).unwrap();
         // 写数据之后未提交
         let put_res1 = wb.put(
             util::rand_kv::get_test_key(1),
@@ -202,7 +205,7 @@ mod tests {
         opts.data_file_size = 64 * 1024 * 1024;
         let engine = Engine::open(opts.clone()).expect("failed to open engine");
 
-        let wb = engine.new_write_batch(WriteBatchOptions::default());
+        let wb = engine.new_write_batch(WriteBatchOptions::default()).unwrap();
         let put_res1 = wb.put(
             util::rand_kv::get_test_key(1),
             util::rand_kv::get_test_value(10),

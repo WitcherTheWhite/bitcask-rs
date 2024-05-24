@@ -1,5 +1,9 @@
 use std::{
-    fs::{File, OpenOptions}, io::Write, os::unix::prelude::FileExt, path::PathBuf, sync::Arc
+    fs::{File, OpenOptions},
+    io::Write,
+    os::unix::prelude::FileExt,
+    path::PathBuf,
+    sync::Arc,
 };
 
 use log::error;
@@ -66,6 +70,12 @@ impl IOManager for FileIO {
                 Err(Errors::FailedSyncDataFile)
             }
         }
+    }
+
+    fn size(&self) -> u64 {
+        let read_guard = self.fd.read();
+        let metadata = read_guard.metadata().unwrap();
+        metadata.len()
     }
 }
 

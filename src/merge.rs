@@ -7,7 +7,7 @@ use std::{
 use crate::{
     batch::{log_record_key_with_seq, parse_log_record_key, NON_TXN_SEQ_NO},
     data::{
-        data_file::{get_data_file_path, DataFile, DATA_FILE_NAME_SUFFIX, HINT_FILE_NAME, MERGE_FINISHED_FILE_NAME},
+        data_file::{get_data_file_path, DataFile, DATA_FILE_NAME_SUFFIX, HINT_FILE_NAME, MERGE_FINISHED_FILE_NAME, SEQ_NO_FILE_NAME},
         log_record::{decode_log_record_pos, LogRecord, LogRecordType},
     },
     db::Engine,
@@ -188,6 +188,9 @@ pub(crate) fn load_merge_files(dir_path: PathBuf) -> Result<(), Errors> {
 
             if file_name.ends_with(MERGE_FINISHED_FILE_NAME) {
                 merge_finished = true;
+            }
+            if file_name.ends_with(SEQ_NO_FILE_NAME) {
+                continue;
             }
 
             // 数据文件容量为空则跳过

@@ -1,4 +1,8 @@
 pub mod btree;
+pub mod skiplist;
+pub mod bptree;
+
+use std::path::PathBuf;
 
 use bytes::Bytes;
 
@@ -7,7 +11,7 @@ use crate::{
     options::{IndexType, IteratorOptions},
 };
 
-use self::btree::BTree;
+use self::{bptree::BPlusTree, btree::BTree, skiplist::SkipList};
 
 /// Indexer 抽象索引接口，可以用不同的数据结构实现该接口
 pub trait Indexer: Sync + Send {
@@ -28,9 +32,11 @@ pub trait Indexer: Sync + Send {
 }
 
 /// 根据类型打开内存索引
-pub fn new_indexer(index_type: IndexType) -> impl Indexer {
+pub fn new_indexer(index_type: IndexType, dir_path: PathBuf) -> Box<dyn Indexer> {
     match index_type {
-        IndexType::BTree => BTree::new(),
+        IndexType::BTree => Box::new(BTree::new()),
+        IndexType::SkipList => Box::new(SkipList::new()),
+        IndexType::BPlusTree => Box::new(BPlusTree::new(dir_path))
     }
 }
 
