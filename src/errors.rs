@@ -57,6 +57,9 @@ pub enum Errors {
 
     #[error("unable to use write batch, seq file not exists")]
     UnableToUseWriteBatch,
+
+    #[error("database is used by another process")]
+    DatabaseIsUsing,
 }
 
 // pub type Result<T> = result::Result<T, Errors>;

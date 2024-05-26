@@ -1,9 +1,10 @@
 use bytes::Bytes;
+use fs2::FileExt;
 use log::warn;
 use parking_lot::{Mutex, RwLock};
 use std::{
     collections::HashMap,
-    fs::{create_dir_all, read_dir, remove_file},
+    fs::{self, create_dir_all, read_dir, remove_file, File},
     path::PathBuf,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -20,10 +21,11 @@ use crate::{
     errors::Errors,
     index::{self, Indexer},
     merge::load_merge_files,
-    options::{IndexType, Options},
+    options::{IOType, IndexType, Options},
 };
 
 const SEQ_NO_KEY: &str = "seq.no";
+pub(crate) const FILE_LOCK_NAME: &str = "flock";
 
 /// bitcask 存储引擎实例
 pub struct Engine {
@@ -47,6 +49,10 @@ pub struct Engine {
     pub(crate) seq_file_exists: bool,
     /// 是否是第一次初始化该目录
     pub(crate) is_initial: bool,
+    /// 文件锁，保证单进程使用
+    lock_file: File,
+    /// 累计写入多少字节
+    bytes_write: Arc<AtomicUsize>,
 }
 
 impl Engine {
@@ -67,6 +73,18 @@ impl Engine {
                 return Err(Errors::FailedCreateDatabaseDir);
             }
         }
+
+        // 判断数据目录是否已经被使用了
+        let lock_file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(dir_path.join(FILE_LOCK_NAME))
+            .unwrap();
+        if let Err(_) = lock_file.try_lock_exclusive() {
+            return Err(Errors::DatabaseIsUsing);
+        }
+
         let entries = read_dir(dir_path.clone()).unwrap();
         if entries.count() == 0 {
             is_initial = true;
@@ -76,7 +94,7 @@ impl Engine {
         load_merge_files(dir_path.clone())?;
 
         // 加载数据文件
-        let mut data_files = load_data_files(dir_path.clone())?;
+        let mut data_files = load_data_files(dir_path.clone(), options.mmap_at_startup)?;
 
         // 创建数据文件列表
         let mut file_ids = Vec::new();
@@ -97,7 +115,7 @@ impl Engine {
         // 获取当前活跃文件
         let active_file = match data_files.pop() {
             Some(file) => file,
-            None => DataFile::new(dir_path.clone(), 0)?,
+            None => DataFile::new(dir_path.clone(), 0, IOType::FileIO)?,
         };
 
         let mut engine = Engine {
@@ -111,6 +129,8 @@ impl Engine {
             merging_lock: Mutex::new(()),
             seq_file_exists: false,
             is_initial,
+            lock_file,
+            bytes_write: Arc::new(AtomicUsize::new(0)),
         };
 
         // b+树索引存放在磁盘上，不需要加载数据文件建立索引
@@ -120,6 +140,9 @@ impl Engine {
 
             // 从数据文件中加载内存索引
             engine.load_index()?;
+
+            // 重置 IO 类型
+            engine.reset_io_type();
         }
 
         if engine.options.index_type == IndexType::BTree {
@@ -138,6 +161,10 @@ impl Engine {
 
     /// 关闭存储引擎，释放相关资源
     pub fn close(&self) -> Result<(), Errors> {
+        // 如果数据目录不存在则返回
+        if !self.options.dir_path.is_dir() {
+            return Ok(());
+        }
         // 记录当前的事务序列号
         let mut seq_no_file = DataFile::new_seq_no_file(self.options.dir_path.clone())?;
         let seq_no = self.seq_no.load(Ordering::SeqCst);
@@ -150,7 +177,12 @@ impl Engine {
         seq_no_file.sync()?;
 
         let read_guard = self.active_file.read();
-        read_guard.sync()
+        read_guard.sync()?;
+
+        // 释放文件锁
+        self.lock_file.unlock().unwrap();
+
+        Ok(())
     }
 
     /// 持久化当前活跃文件
@@ -267,10 +299,10 @@ impl Engine {
 
             let mut older_files = self.older_files.write();
             let current_fid = active_file.get_file_id();
-            let old_file = DataFile::new(dir_path.clone(), current_fid)?;
+            let old_file = DataFile::new(dir_path.clone(), current_fid, IOType::FileIO)?;
             older_files.insert(current_fid, old_file);
 
-            let new_file = DataFile::new(dir_path, current_fid + 1)?;
+            let new_file = DataFile::new(dir_path, current_fid + 1, IOType::FileIO)?;
             *active_file = new_file;
         }
 
@@ -278,9 +310,16 @@ impl Engine {
         let write_off = active_file.get_write_off();
         active_file.write(&enc_record)?;
 
+        let previous = self.bytes_write.fetch_add(enc_record.len(), Ordering::SeqCst);
         // 根据配置项决定是否持久化
-        if self.options.sync_writes {
+        let mut need_sync = self.options.sync_writes;
+        if !need_sync && self.options.bytes_per_sync > 0 && previous + enc_record.len() > self.options.bytes_per_sync {
+            need_sync = true;
+        } 
+
+        if need_sync {
             active_file.sync()?;
+            self.bytes_write.store(0, Ordering::SeqCst);
         }
 
         Ok(LogRecordPos {
@@ -426,6 +465,15 @@ impl Engine {
 
         (true, seq_no)
     }
+
+    fn reset_io_type(&self) {
+        let mut active_file = self.active_file.write();
+        active_file.set_io_manager(self.options.dir_path.clone(), IOType::FileIO);
+        let mut older_files = self.older_files.write();
+        for (_, file) in older_files.iter_mut() {
+            file.set_io_manager(self.options.dir_path.clone(), IOType::FileIO);
+        }
+    }
 }
 
 impl Drop for Engine {
@@ -449,7 +497,7 @@ fn check_options(options: &Options) -> Option<Errors> {
     None
 }
 
-fn load_data_files(dir_path: PathBuf) -> Result<Vec<DataFile>, Errors> {
+fn load_data_files(dir_path: PathBuf, use_mmap: bool) -> Result<Vec<DataFile>, Errors> {
     let dir = read_dir(dir_path.clone());
     if dir.is_err() {
         return Err(Errors::FailedOpenDatabaseDir);
@@ -480,9 +528,13 @@ fn load_data_files(dir_path: PathBuf) -> Result<Vec<DataFile>, Errors> {
         return Ok(data_files);
     }
 
+    let mut io_type = IOType::FileIO;
+    if use_mmap {
+        io_type = IOType::MMapIO;
+    }
     file_ids.sort();
     for file_id in file_ids.iter() {
-        let data_file = DataFile::new(dir_path.clone(), *file_id)?;
+        let data_file = DataFile::new(dir_path.clone(), *file_id, io_type)?;
         data_files.push(data_file);
     }
 

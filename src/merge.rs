@@ -10,9 +10,9 @@ use crate::{
         data_file::{get_data_file_path, DataFile, DATA_FILE_NAME_SUFFIX, HINT_FILE_NAME, MERGE_FINISHED_FILE_NAME, SEQ_NO_FILE_NAME},
         log_record::{decode_log_record_pos, LogRecord, LogRecordType},
     },
-    db::Engine,
+    db::{Engine, FILE_LOCK_NAME},
     errors::Errors,
-    options::Options,
+    options::{IOType, Options},
 };
 
 const MERGE_DIR_NAME: &str = "merge";
@@ -104,9 +104,9 @@ impl Engine {
         // 持久化当前活跃文件并加入到旧文件列表，设置新的活跃文件
         active_file.sync()?;
         let current_fid = active_file.get_file_id();
-        let old_file = DataFile::new(self.options.dir_path.clone(), current_fid)?;
+        let old_file = DataFile::new(self.options.dir_path.clone(), current_fid, IOType::FileIO)?;
         older_files.insert(current_fid, old_file);
-        let new_file = DataFile::new(self.options.dir_path.clone(), current_fid + 1)?;
+        let new_file = DataFile::new(self.options.dir_path.clone(), current_fid + 1, IOType::FileIO)?;
         *active_file = new_file;
 
         // merge 文件从小到大依次 merge
@@ -118,7 +118,7 @@ impl Engine {
 
         let mut merge_files = Vec::new();
         for fid in merge_file_ids.iter() {
-            merge_files.push(DataFile::new(self.options.dir_path.clone(), *fid)?);
+            merge_files.push(DataFile::new(self.options.dir_path.clone(), *fid, IOType::FileIO)?);
         }
 
         Ok(merge_files)
@@ -190,6 +190,9 @@ pub(crate) fn load_merge_files(dir_path: PathBuf) -> Result<(), Errors> {
                 merge_finished = true;
             }
             if file_name.ends_with(SEQ_NO_FILE_NAME) {
+                continue;
+            }
+            if file_name.ends_with(FILE_LOCK_NAME) {
                 continue;
             }
 
