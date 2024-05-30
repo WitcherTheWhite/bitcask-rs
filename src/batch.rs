@@ -26,7 +26,10 @@ pub struct WriteBatch<'a> {
 
 impl Engine {
     pub fn new_write_batch(&self, options: WriteBatchOptions) -> Result<WriteBatch, Errors> {
-        if self.options.index_type == IndexType::BPlusTree && !self.seq_file_exists && !self.is_initial {
+        if self.options.index_type == IndexType::BPlusTree
+            && !self.seq_file_exists
+            && !self.is_initial
+        {
             return Err(Errors::UnableToUseWriteBatch);
         }
         Ok(WriteBatch {
@@ -124,8 +127,21 @@ impl WriteBatch<'_> {
 
         // 所有数据写入成功后更新索引
         for (key, record) in pending_writes.iter() {
-            let pos = positons.get(key).unwrap();
-            self.engine.update_index(key.clone(), record.rec_type, *pos);
+            if record.rec_type == LogRecordType::NOAMAL {
+                let pos = positons.get(key).unwrap();
+                if let Some(old_pos) = self.engine.index.put(key.clone(), *pos) {
+                    self.engine
+                        .reclaim_size
+                        .fetch_add(old_pos.size as usize, Ordering::SeqCst);
+                }
+            }
+            if record.rec_type == LogRecordType::DELETED {
+                if let Some(old_pos) = self.engine.index.delete(key.clone()) {
+                    self.engine
+                        .reclaim_size
+                        .fetch_add(old_pos.size as usize, Ordering::SeqCst);
+                }
+            }
         }
 
         // 清空暂存数据
@@ -167,7 +183,9 @@ mod tests {
         opts.data_file_size = 64 * 1024 * 1024;
         let engine = Engine::open(opts.clone()).expect("failed to open engine");
 
-        let wb = engine.new_write_batch(WriteBatchOptions::default()).unwrap();
+        let wb = engine
+            .new_write_batch(WriteBatchOptions::default())
+            .unwrap();
         // 写数据之后未提交
         let put_res1 = wb.put(
             util::rand_kv::get_test_key(1),
@@ -205,7 +223,9 @@ mod tests {
         opts.data_file_size = 64 * 1024 * 1024;
         let engine = Engine::open(opts.clone()).expect("failed to open engine");
 
-        let wb = engine.new_write_batch(WriteBatchOptions::default()).unwrap();
+        let wb = engine
+            .new_write_batch(WriteBatchOptions::default())
+            .unwrap();
         let put_res1 = wb.put(
             util::rand_kv::get_test_key(1),
             util::rand_kv::get_test_value(10),

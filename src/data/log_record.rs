@@ -12,6 +12,7 @@ use prost::{
 pub struct LogRecordPos {
     pub(crate) file_id: u32,
     pub(crate) offset: u64,
+    pub(crate) size: u32,
 }
 
 impl LogRecordPos {
@@ -20,6 +21,7 @@ impl LogRecordPos {
         let mut buf = BytesMut::new();
         encode_varint(self.file_id as u64, &mut buf);
         encode_varint(self.offset, &mut buf);
+        encode_varint(self.size as u64, &mut buf);
         buf.to_vec()
     }
 }
@@ -36,10 +38,15 @@ pub fn decode_log_record_pos(pos: Vec<u8>) -> LogRecordPos {
         Ok(n) => n,
         Err(e) => panic!("decode log record pos err: {}", e),
     };
+    let size = match decode_varint(&mut buf) {
+        Ok(size) => size as u32,
+        Err(e) => panic!("decode log record pos err: {}", e),
+    };
 
     LogRecordPos {
         file_id,
         offset,
+        size,
     }
 }
 

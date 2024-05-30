@@ -8,6 +8,7 @@ pub struct Options {
     pub bytes_per_sync: usize, // 累计字节后持久化
     pub index_type: IndexType, // 索引类型
     pub mmap_at_startup: bool, // 是否使用 mmap 读取数据文件
+    pub data_file_merge_ratio: f32, // 达到阈值时 merge 
 }
 
 #[derive(Clone, PartialEq)]
@@ -26,6 +27,7 @@ impl Default for Options {
             bytes_per_sync: 0,
             index_type: IndexType::SkipList,
             mmap_at_startup: true,
+            data_file_merge_ratio: 0.5,
         }
     }
 }

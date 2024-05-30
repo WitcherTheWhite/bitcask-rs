@@ -21,20 +21,27 @@ impl SkipList {
 }
 
 impl Indexer for SkipList {
-    fn put(&self, key: Vec<u8>, pos: LogRecordPos) -> bool {
+    fn put(&self, key: Vec<u8>, pos: LogRecordPos) -> Option<LogRecordPos> {
+        let mut result = None;
+        if let Some(entry) = self.skl.get(&key) {
+            result = Some(*entry.value());
+        }
         self.skl.insert(key, pos);
-        true
+        result
     }
 
     fn get(&self, key: Vec<u8>) -> Option<LogRecordPos> {
         if let Some(entry) = self.skl.get(&key) {
-            return Some(*entry.value())
+            return Some(*entry.value());
         }
         None
     }
 
-    fn delete(&self, key: Vec<u8>) -> bool {
-        self.skl.remove(&key).is_some()
+    fn delete(&self, key: Vec<u8>) -> Option<LogRecordPos> {
+        if let Some(entry) = self.skl.remove(&key) {
+            return Some(*entry.value());
+        }
+        None
     }
 
     fn iterator(&self, options: IteratorOptions) -> Box<dyn IndexIterator> {
@@ -116,42 +123,50 @@ mod tests {
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res1);
+        assert!(res1.is_none());
         let res2 = skl.put(
             "acdd".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res2);
+        assert!(res2.is_none());
         let res3 = skl.put(
             "bbae".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res3);
+        assert!(res3.is_none());
         let res4 = skl.put(
             "ddee".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res4);
+        assert!(res4.is_none());
 
         let res5 = skl.put(
             "ddee".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 93,
                 offset: 22,
+                size: 11,
             },
         );
-        assert!(res5);
+        assert!(res5.is_some());
+        let v = res5.unwrap();
+        assert_eq!(v.file_id, 1123);
+        assert_eq!(v.offset, 1232);
     }
 
     #[test]
@@ -166,9 +181,10 @@ mod tests {
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res1);
+        assert!(res1.is_none());
         let v2 = skl.get(b"aacd".to_vec());
         assert!(v2.is_some());
 
@@ -177,9 +193,10 @@ mod tests {
             LogRecordPos {
                 file_id: 11,
                 offset: 990,
+                size: 11,
             },
         );
-        assert!(res2);
+        assert!(res2.is_some());
         let v3 = skl.get(b"aacd".to_vec());
         assert!(v3.is_some());
     }
@@ -189,19 +206,23 @@ mod tests {
         let skl = SkipList::new();
 
         let r1 = skl.delete(b"not exists".to_vec());
-        assert!(!r1);
+        assert!(r1.is_none());
 
         let res1 = skl.put(
             "aacd".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res1);
+        assert!(res1.is_none());
 
         let r2 = skl.delete(b"aacd".to_vec());
-        assert!(r2);
+        assert!(r2.is_some());
+        let v = r2.unwrap();
+        assert_eq!(v.file_id, 1123);
+        assert_eq!(v.offset, 1232);
 
         let v2 = skl.get(b"aacd".to_vec());
         assert!(v2.is_none());
@@ -219,33 +240,37 @@ mod tests {
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res1);
+        assert!(res1.is_none());
         let res2 = skl.put(
             "acdd".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res2);
+        assert!(res2.is_none());
         let res3 = skl.put(
             "bbae".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res3);
+        assert!(res3.is_none());
         let res4 = skl.put(
             "ddee".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res4);
+        assert!(res4.is_none());
 
         let keys2 = skl.list_keys();
         assert_eq!(keys2.len(), 4);
@@ -260,33 +285,37 @@ mod tests {
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res1);
+        assert!(res1.is_none());
         let res2 = skl.put(
             "acdd".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res2);
+        assert!(res2.is_none());
         let res3 = skl.put(
             "bbae".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res3);
+        assert!(res3.is_none());
         let res4 = skl.put(
             "ddee".as_bytes().to_vec(),
             LogRecordPos {
                 file_id: 1123,
                 offset: 1232,
+                size: 11,
             },
         );
-        assert!(res4);
+        assert!(res4.is_none());
 
         let mut opts = IteratorOptions::default();
         opts.reverse = true;
@@ -297,4 +326,3 @@ mod tests {
         }
     }
 }
-

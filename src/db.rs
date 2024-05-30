@@ -22,6 +22,7 @@ use crate::{
     index::{self, Indexer},
     merge::load_merge_files,
     options::{IOType, IndexType, Options},
+    util::file::dir_disk_size,
 };
 
 const SEQ_NO_KEY: &str = "seq.no";
@@ -53,6 +54,21 @@ pub struct Engine {
     lock_file: File,
     /// 累计写入多少字节
     bytes_write: Arc<AtomicUsize>,
+    /// 累计可以 merge 的数据量
+    pub(crate) reclaim_size: Arc<AtomicUsize>,
+}
+
+/// 存储引擎相关统计信息
+#[derive(Debug)]
+pub struct Stat {
+    /// key 的总数量
+    pub key_num: usize,
+    /// 数据文件的数量
+    pub data_file_num: usize,
+    /// 可以回收的数据量
+    pub reclaim_size: usize,
+    /// 占据磁盘空间大小
+    pub disk_size: u64,
 }
 
 impl Engine {
@@ -131,6 +147,7 @@ impl Engine {
             is_initial,
             lock_file,
             bytes_write: Arc::new(AtomicUsize::new(0)),
+            reclaim_size: Arc::new(AtomicUsize::new(0)),
         };
 
         // b+树索引存放在磁盘上，不需要加载数据文件建立索引
@@ -191,6 +208,18 @@ impl Engine {
         read_guard.sync()
     }
 
+    /// 获取统计信息
+    pub fn stat(&self) -> Result<Stat, Errors> {
+        let keys = self.list_keys();
+        let older_files = self.older_files.read();
+        Ok(Stat {
+            key_num: keys.len(),
+            data_file_num: older_files.len() + 1,
+            reclaim_size: self.reclaim_size.load(Ordering::SeqCst),
+            disk_size: dir_disk_size(self.options.dir_path.clone()),
+        })
+    }
+
     /// 存储 key/value 数据，key 不能为空
     pub fn put(&self, key: Bytes, value: Bytes) -> Result<(), Errors> {
         if key.is_empty() {
@@ -206,10 +235,12 @@ impl Engine {
         let log_record_pos = self.append_log_record(log_record)?;
 
         // 更新内存索引
-        match self.index.put(key.to_vec(), log_record_pos) {
-            true => Ok(()),
-            false => Err(Errors::FailedIndexUpdate),
+        if let Some(old_pos) = self.index.put(key.to_vec(), log_record_pos) {
+            self.reclaim_size
+                .fetch_add(old_pos.size as usize, Ordering::SeqCst);
         }
+
+        Ok(())
     }
 
     /// 根据 key 获取数据
@@ -263,13 +294,17 @@ impl Engine {
             value: Default::default(),
             rec_type: LogRecordType::DELETED,
         };
-        self.append_log_record(log_record)?;
+        let pos = self.append_log_record(log_record)?;
+        self.reclaim_size
+            .fetch_add(pos.size as usize, Ordering::SeqCst);
 
         // 更新内存索引
-        match self.index.delete(key.to_vec()) {
-            true => Ok(()),
-            false => Err(Errors::FailedIndexUpdate),
+        if let Some(old_pos) = self.index.delete(key.to_vec()) {
+            self.reclaim_size
+                .fetch_add(old_pos.size as usize, Ordering::SeqCst);
         }
+
+        Ok(())
     }
 
     // 从内存索引中获取数据位置信息
@@ -310,12 +345,17 @@ impl Engine {
         let write_off = active_file.get_write_off();
         active_file.write(&enc_record)?;
 
-        let previous = self.bytes_write.fetch_add(enc_record.len(), Ordering::SeqCst);
+        let previous = self
+            .bytes_write
+            .fetch_add(enc_record.len(), Ordering::SeqCst);
         // 根据配置项决定是否持久化
         let mut need_sync = self.options.sync_writes;
-        if !need_sync && self.options.bytes_per_sync > 0 && previous + enc_record.len() > self.options.bytes_per_sync {
+        if !need_sync
+            && self.options.bytes_per_sync > 0
+            && previous + enc_record.len() > self.options.bytes_per_sync
+        {
             need_sync = true;
-        } 
+        }
 
         if need_sync {
             active_file.sync()?;
@@ -325,6 +365,7 @@ impl Engine {
         Ok(LogRecordPos {
             file_id: active_file.get_file_id(),
             offset: write_off,
+            size: enc_record.len() as u32,
         })
     }
 
@@ -382,6 +423,7 @@ impl Engine {
                 let log_record_pos = LogRecordPos {
                     file_id: *file_id,
                     offset,
+                    size: size as u32,
                 };
 
                 // 解析 key ,拿到实际 key 和事务序列号
@@ -392,10 +434,7 @@ impl Engine {
 
                 // 非事务数据直接更新索引，事务数据先暂存，读到 TXN_FIN_KEY 统一更新索引
                 if seq_no == NON_TXN_SEQ_NO {
-                    let ok = self.update_index(real_key, log_record.rec_type, log_record_pos);
-                    if !ok {
-                        return Err(Errors::FailedIndexUpdate);
-                    }
+                    self.update_index(real_key, log_record.rec_type, log_record_pos);
                 } else {
                     if log_record.rec_type == LogRecordType::TXNFINISHED {
                         let records = txn_batch.get(&seq_no).unwrap();
@@ -431,17 +470,20 @@ impl Engine {
         Ok(())
     }
 
-    // 更新内存索引
-    pub(crate) fn update_index(
-        &self,
-        key: Vec<u8>,
-        rec_type: LogRecordType,
-        pos: LogRecordPos,
-    ) -> bool {
-        match rec_type {
-            LogRecordType::NOAMAL => self.index.put(key, pos),
-            LogRecordType::DELETED => self.index.delete(key),
-            _ => true,
+    // 启动时更新内存索引
+    pub(crate) fn update_index(&self, key: Vec<u8>, rec_type: LogRecordType, pos: LogRecordPos) {
+        if rec_type == LogRecordType::NOAMAL {
+            if let Some(old_pos) = self.index.put(key.clone(), pos) {
+                self.reclaim_size
+                    .fetch_add(old_pos.size as usize, Ordering::SeqCst);
+            }
+        }
+        if rec_type == LogRecordType::DELETED {
+            let mut size = pos.size;
+            if let Some(old_pos) = self.index.delete(key) {
+                size += old_pos.size;
+            }
+            self.reclaim_size.fetch_add(size as usize, Ordering::SeqCst);
         }
     }
 
@@ -492,6 +534,10 @@ fn check_options(options: &Options) -> Option<Errors> {
 
     if options.data_file_size <= 0 {
         return Some(Errors::DataFileSizeInvalid);
+    }
+
+    if options.data_file_merge_ratio < 0 as f32 || options.data_file_merge_ratio > 1 as f32 {
+        return Some(Errors::InvalidMergeRatio);
     }
 
     None
