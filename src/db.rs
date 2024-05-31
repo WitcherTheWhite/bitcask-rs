@@ -22,7 +22,7 @@ use crate::{
     index::{self, Indexer},
     merge::load_merge_files,
     options::{IOType, IndexType, Options},
-    util::file::dir_disk_size,
+    util::file::{copy_dir, dir_disk_size},
 };
 
 const SEQ_NO_KEY: &str = "seq.no";
@@ -218,6 +218,17 @@ impl Engine {
             reclaim_size: self.reclaim_size.load(Ordering::SeqCst),
             disk_size: dir_disk_size(self.options.dir_path.clone()),
         })
+    }
+
+    /// 备份数据目录
+    pub fn backup(&self, dir_path: PathBuf) -> Result<(), Errors> {
+        let exclude = [FILE_LOCK_NAME];
+        if let Err(e) = copy_dir(self.options.dir_path.clone(), dir_path, &exclude) {
+            log::error!("failed to copy dir: {}", e);
+            return Err(Errors::FailedToCopyDir);
+        }
+
+        Ok(())
     }
 
     /// 存储 key/value 数据，key 不能为空
