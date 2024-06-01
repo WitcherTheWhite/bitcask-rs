@@ -1,7 +1,7 @@
 mod index;
 mod data;
 mod fio;
-mod errors;
+pub mod errors;
 mod util;
 
 pub mod db;

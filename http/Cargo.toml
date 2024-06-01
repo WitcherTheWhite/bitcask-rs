@@ -1,0 +1,9 @@
+[package]
+name = "http"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actix-web = "4.6.0"
+bitcask = {path = "../../bitcask"}
+serde_json = "1.0.117"

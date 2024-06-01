@@ -22,3 +22,8 @@ memmap2 = "0.9.4"
 parking_lot = "0.12.2"
 prost = "0.12.4"
 thiserror = "1.0.59"
+
+[workspace]
+members = [
+    "http"
+]
